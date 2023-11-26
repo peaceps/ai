@@ -80,7 +80,7 @@ class Trainer:
         print('Finished Training! Total cost time: ', time.time() - start)
         torch.save(self.net.state_dict(), model_path)
 
-    def validate(self, test_data, class_labels):
+    def validate(self, test_data, classes):
         self.net.eval()
         class_correct = list(0. for i in range(10))
         class_total = list(0. for i in range(10))
@@ -96,20 +96,20 @@ class Trainer:
                     class_total[label] += 1
 
         for i in range(10):
-            print('Accuracy of %5s : %2d %%' % (class_labels[i], 100 * class_correct[i] / class_total[i]))
+            print('Accuracy of %5s : %2d %%' % (classes[i], 100 * class_correct[i] / class_total[i]))
         print(f'Accuracy of the network on the {sum(class_total)} test images: %d %%'
               % (100 * sum(class_correct) / sum(class_total)))
 
-    def validate_one(self, test_data, class_labels):
+    def validate_one(self, test_data, classes):
         self.net.eval()
         dataiter = iter(test_data)
         images, labels = next(dataiter)
         imshow(torchvision.utils.make_grid(images))
-        print('GroundTruth: ', ' '.join('%5s' % class_labels[labels[j]] for j in range(4)))
+        print('GroundTruth: ', ' '.join('%5s' % classes[labels[j]] for j in range(4)))
 
         outputs = self.net(images)
         _, predicted = torch.max(outputs, 1)
-        print('Predicted: ', ' '.join('%5s' % class_labels[predicted[j]] for j in range(4)))
+        print('Predicted: ', ' '.join('%5s' % classes[predicted[j]] for j in range(4)))
 
 
 def imshow(img):
@@ -135,5 +135,6 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
     # print(torch.cuda.is_available())
+    main()
+
