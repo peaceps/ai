@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 from sdk import RandomPlayer
 from sdk import Game
+from reversi.reinforcement.player import MyPlayer
 
 import importlib
 import datetime
 
 if __name__ == '__main__': 
-    player1 = RandomPlayer('X')
+    player1 = MyPlayer('X')
     player2 = RandomPlayer('O')
     game = Game(player1, player2)
 
