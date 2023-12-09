@@ -11,7 +11,7 @@ from .player import Player
 
 
 class Game:
-    def __init__(self, player1: Player, player2: Player, timeout = 150):
+    def __init__(self, player1: Player, player2: Player, timeout=150, move_timeout=6):
         """初始化对局
 
         如果player1与player同色,则player1为黑棋,先手
@@ -34,7 +34,7 @@ class Game:
             self.white_player = player1
         self.player1_color = player1.color
         
-        self._move_timeout = 6
+        self._move_timeout = move_timeout
         self._cum_timeout = timeout
         
     def get_player_by_color(self, color: str) -> str:

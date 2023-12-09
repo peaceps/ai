@@ -1,84 +1,66 @@
 import random
-import json
+from copy import deepcopy
+
 from reversi.sdk import Board
-from reversi.reinforcement.utils import get_board_state, get_opposite_player, get_abs_folder_path
+from reversi.reinforcement.trainer import ReversiTrainers
+from reversi.reinforcement.utils import get_board_state, get_opposite_player, action_num
 
 
 class GameSampler:
 
     DEFAULT_VALUED = 0.
 
-    def __init__(self, sample_config):
-        self.q_sa = {'X': {}, 'O': {}}
+    def __init__(self, sample_config, continue_training=False):
+        self.trainers = ReversiTrainers(continue_training)
         self.rewards = sample_config['position_rewards']
-        self.alpha = sample_config['alpha']
         self.gama = sample_config['gama']
-        self.epsilon = sample_config['epsilon']
-        self.winner_bonus = sample_config['winner_bonus']
+        self.epsilon = sample_config['max_epsilon']
+        self.winner_bonus = sum(map(lambda r: sum(r), self.rewards))
         self.display_steps = False
 
     def start_sampling(self, sampling_round, display_steps=False):
-        self.q_sa = {'X': {}, 'O': {}}
+        self.trainers.start_training()
         self.display_steps = display_steps
-        for _ in range(sampling_round):
+        for i in range(sampling_round):
+            self.epsilon *= 1 - i / sampling_round
             self._sample_one_game()
-        self._save_result(sampling_round)
-
-    def _save_result(self, sampling_round):
-        result_str = json.dumps(self.q_sa, indent=2)
-        file = open(f'{get_abs_folder_path()}/files/α_{self.alpha}_γ_{self.gama}_ε_{self.epsilon}'
-                    f'_bonus_{self.winner_bonus}_{sampling_round}_round_sampling.txt', 'w')
-        file.write(result_str)
-        file.close()
+        self.trainers.stop_training()
 
     def _sample_one_game(self):
+        self.trainers.begin_one_game()
         board = Board()
-        finished, state, color = False, get_board_state(board), 'X'
+        finished, color = False, 'X'
         while not finished:
-            finished, state, color = self._move_next(board, state, color)
-        res, diff = board.get_winner()
-        if diff > 0:
-            winner = 'X' if res == 0 else 'O'
-            bonus = diff * self.winner_bonus
-            print(f'Winner is {winner} and win {diff}!')
-            for i in range(4, len(board.move_history)):
-                if board.move_history[i]['current_color'] == winner:
-                    self._add_q_sa_value(get_board_state(board.move_history[i-1]), winner,
-                                         board.move_history[i]['action'], bonus, True)
-        pass
+            finished, color = self._move_next(board, color)
+        self.trainers.finish_one_game()
 
-    def _move_next(self, board, state, color):
+    def _move_next(self, board, color):
+        state = get_board_state(board)
         legal_actions = list(board.get_legal_actions(color))
-        self._init_q_state(state, color, legal_actions)
-        taken_action = self._get_action_by_greedy_epsilon(state, color, legal_actions)
-        board._move(taken_action, color, append_to_history=True)
+        taken_action = self._get_action_by_greedy_epsilon(state, color, legal_actions)  # 根据pi-ε选择下一步动作
+        action_values = {}
+        result = None
+        for action in legal_actions:
+            action_result = self._get_results_for_action(deepcopy(board), color, action)  # 获取当前棋盘所有可能动作的回报期望
+            action_values[action] = action_result[0]
+            if action == taken_action:
+                result = action_result[1], action_result[2]
+
+        self.trainers.train_by_one_move(color, state, legal_actions, action_values)
+
+        board._move(taken_action, color)
+
         if self.display_steps:
             board.display()
 
-        i, j = board.board_num(taken_action)
-        r = self.rewards[i][j]
-
-        new_state = get_board_state(board)
-        factor, new_color = -1, get_opposite_player(color)
-        new_legal_actions = list(board.get_legal_actions(new_color))
-        if len(new_legal_actions) == 0:
-            factor, new_color = 1, color
-            new_legal_actions = list(board.get_legal_actions(new_color))
-            if len(new_legal_actions) == 0:
-                return True, '', ''
-        next_gain_expectation = self._get_next_state_actions_expectation(new_state, new_color, new_legal_actions)
-
-        current_q_sa_value = self._get_q_sa_value(state, color, taken_action)
-        self._add_q_sa_value(state, color, taken_action,
-                             self.alpha * (r + factor * self.gama * next_gain_expectation - current_q_sa_value))
-
-        return False, new_state, new_color
+        return result
 
     def _get_action_by_greedy_epsilon(self, state, color, actions):
         if len(actions) == 1:
             return actions[0]
-        best_action = self._get_best_action(state, color, actions)
-        r1 = random.random()
+        action_values = self.trainers.get_action_values(color, state, actions)  # 获取当前状态的所有动作回报
+        best_action = self._get_best_action(actions, action_values)
+        r1 = random.random()  # pi(a) = ε/n if a != a* else (1 - ε + ε/n)
         if r1 > self.epsilon:
             taken_action = best_action
         else:
@@ -86,41 +68,46 @@ class GameSampler:
             taken_action = left_actions[random.randint(0, len(left_actions)-1)]
         return taken_action
 
-    def _get_best_action(self, state, color, actions):
+    def _get_best_action(self, actions, action_values):
         max_g = -float('inf')
         best_action = ''
         for action in actions:
-            g = self._get_q_sa_value(state, color, action)
+            x, y = action_num(action)
+            g = action_values[x][y]
             if g > max_g:
                 max_g = g
                 best_action = action
         return best_action
 
-    def _get_next_state_actions_expectation(self, state, color, actions):
-        best_action = self._get_best_action(state, color, actions)
-        expectation = 0
+    def _get_results_for_action(self, board, color, action):
+        board._move(action, color)
+        i, j = board.board_num(action)
+        r = self.rewards[i][j]  # 获取直接回报
+
+        factor, new_color = -1, get_opposite_player(color)
+        new_legal_actions = list(board.get_legal_actions(new_color))
+        if len(new_legal_actions) == 0:  # 如果对方无子可走，本方继续落子
+            factor, new_color = 1, color
+            new_legal_actions = list(board.get_legal_actions(new_color))
+            if len(new_legal_actions) == 0:  # 如果本方也无子可走，游戏结束，如果获胜+bonus，失败则-bonus
+                win_color = 'X' if board.get_winner() == 0 else 'O' if board.get_winner() == 1 else '.'
+                return (r + self.gama * self.winner_bonus
+                        * (0 if win_color == '.' else 1 if win_color == color else -1), True, '')
+            
+        new_action_values = self.trainers.get_action_values(new_color, get_board_state(board), new_legal_actions)
+        next_gain_expectation = self._get_next_actions_expectation(new_legal_actions, new_action_values)  # 获取落子后棋盘期望
+        target = r + factor * self.gama * next_gain_expectation  # 计算回报
+        return target, False, new_color
+
+    def _get_next_actions_expectation(self, actions, action_expectations):
+        best_action = self._get_best_action(actions, action_expectations)
+        expectation = 0  # E=Σpi(a~s)Q(s,a)
         for action in actions:
+            x, y = action_num(action)
             probability = 1 - self.epsilon + self.epsilon / len(actions) if action == best_action\
                 else self.epsilon / len(actions)
-            expectation += self._get_q_sa_value(state, color, action) * probability
+            expectation += action_expectations[x][y] * probability
         return expectation
-
-    def _init_q_state(self, state, color, legal_actions):
-        if state not in self.q_sa[color]:
-            self.q_sa[color][state] = {}
-            for action in legal_actions:
-                self.q_sa[color][state][action] = {'count': 0, 'value': GameSampler.DEFAULT_VALUED}
-
-    def _get_q_sa_value(self, state, color, action):
-        if state not in self.q_sa[color] or action not in self.q_sa[color][state]:
-            return GameSampler.DEFAULT_VALUED
-        return self.q_sa[color][state][action]['value']
-
-    def _add_q_sa_value(self, state, color, action, value, winner_bonus=False):
-        action_data = self.q_sa[color][state][action]
-        action_data['value'] += value
-        if not winner_bonus:
-            action_data['count'] += 1
 
 
 if __name__ == '__main__':
@@ -134,11 +121,9 @@ if __name__ == '__main__':
             [10., 2., 5., 1., 1., 5., 2., 10.],
             [-35., -35., 2., 2., 2., 2., -35., -35.],
             [100., -35., 10., 5., 5., 10., -35., 100.]
-        ],
-        'alpha': 0.01,
-        'gama': 0.5,
-        'epsilon': 0.5,
-        'winner_bonus': 0.1
+        ],  # 棋盘落子回报
+        'gama': 0.5,  # 行动折扣率，越大眼光越长远，越小越优先考虑近期回报
+        'max_epsilon': 0.8  # 贪心率，越小越保守，优先采用当前最优策略，越大越优先探索其他路径
     }
-    sampler = GameSampler(config)
-    sampler.start_sampling(1)
+    sampler = GameSampler(config, True)  # continue_training为True时会从当前模型开始继续训练，False则从头训练
+    sampler.start_sampling(5)
