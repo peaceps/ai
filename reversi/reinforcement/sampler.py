@@ -16,11 +16,9 @@ class GameSampler:
         self.gama = sample_config['gama']
         self.epsilon = sample_config['max_epsilon']
         self.winner_bonus = sum(map(lambda r: sum(r), self.rewards))
-        self.display_steps = False
 
-    def start_sampling(self, sampling_round, display_steps=False):
+    def start_sampling(self, sampling_round):
         self.trainers.start_training()
-        self.display_steps = display_steps
         for i in range(sampling_round):
             self.epsilon *= 1 - i / sampling_round
             self._sample_one_game()
@@ -37,7 +35,7 @@ class GameSampler:
     def _move_next(self, board, color):
         state = get_board_state(board)
         legal_actions = list(board.get_legal_actions(color))
-        taken_action = self._get_action_by_greedy_epsilon(state, color, legal_actions)  # 根据pi-ε选择下一步动作
+        taken_action = self._get_action_by_greedy_epsilon(state, color, legal_actions)  # 根据greedy-ε选择下一步动作
         action_values = {}
         result = None
         for action in legal_actions:
@@ -49,9 +47,6 @@ class GameSampler:
         self.trainers.train_by_one_move(color, state, legal_actions, action_values)
 
         board._move(taken_action, color)
-
-        if self.display_steps:
-            board.display()
 
         return result
 
@@ -125,5 +120,5 @@ if __name__ == '__main__':
         'gama': 0.5,  # 行动折扣率，越大眼光越长远，越小越优先考虑近期回报
         'max_epsilon': 0.8  # 贪心率，越小越保守，优先采用当前最优策略，越大越优先探索其他路径
     }
-    sampler = GameSampler(config, True)  # continue_training为True时会从当前模型开始继续训练，False则从头训练
+    sampler = GameSampler(config, True)  # continue_training为True时会从当前模型开始继续训练，False则从头训练，模型及参数更改后应设为False
     sampler.start_sampling(5)

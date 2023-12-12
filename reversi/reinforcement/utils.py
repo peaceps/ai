@@ -31,3 +31,9 @@ def move_and_get_next_color(board, action, color):
 
 def get_opposite_player(color):
     return 'X' if color == 'O' else 'O'
+
+
+def display_history(board_data):
+    print(' ', ' '.join(list('ABCDEFGH')))
+    for i in range(8):
+        print(str(i + 1), ' '.join(board_data[i]))

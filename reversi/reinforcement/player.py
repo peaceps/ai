@@ -9,7 +9,6 @@ class TrainedPlayer(Player):
         self.trainer = GameTrainer(color, True, True)
 
     def get_move(self, board):
-        # board.display()
         action = self.trainer.get_next_move(board)
         return action
 
